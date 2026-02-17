@@ -91,7 +91,7 @@ pytest tests/
 
 ## 作者
 
-基于 TensorRT-LLM XQA 模块学习创建
+jensen.li(后续将基于 TensorRT-LLM XQA 模块更加深入分析，添加更多优化手段和工程化技巧介绍；欢迎star和讨论)
 
 ## License
 
