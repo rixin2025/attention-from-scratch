@@ -8,6 +8,16 @@ import torch
 import torch.nn as nn
 from typing import Optional, Tuple
 
+# 导入 create_causal_mask
+try:
+    from .attention import create_causal_mask
+except ImportError:
+    # 如果相对导入失败，尝试绝对导入
+    import sys
+    import os
+    sys.path.insert(0, os.path.dirname(__file__))
+    from attention import create_causal_mask
+
 
 class KVCache:
     """
@@ -183,6 +193,7 @@ class MultiHeadAttentionWithCache(nn.Module):
         use_cache: bool = False,
         start_pos: Optional[int] = None,
         mask: Optional[torch.Tensor] = None,
+        causal: bool = True,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Args:
@@ -192,6 +203,7 @@ class MultiHeadAttentionWithCache(nn.Module):
             use_cache: 是否使用 KV Cache
             start_pos: KV Cache 的起始位置
             mask: 可选的 mask 张量
+            causal: 是否使用因果 mask（自回归场景）
         
         Returns:
             output: 输出张量，形状 [batch_size, seq_len_q, d_model]
@@ -212,13 +224,27 @@ class MultiHeadAttentionWithCache(nn.Module):
             
             # 更新缓存并获取完整的 K, V
             K, V = self.kv_cache.update(K, V, start_pos)
+            seq_len_k = K.size(2)
+        else:
+            seq_len_k = K.size(2)
         
         # 3. 计算 Scaled Dot-Product Attention
         d_k = Q.size(-1)
         scores = torch.matmul(Q, K.transpose(-2, -1)) / torch.sqrt(torch.tensor(d_k, dtype=Q.dtype))
         
+        # 4. 应用 mask
         if mask is not None:
+            # 用户提供的 mask 优先
             scores = scores.masked_fill(mask == 0, float('-inf'))
+        elif causal:
+            # 需要因果 mask 的场景：
+            # 1. Prefill 阶段（use_cache=True, start_pos=0）
+            # 2. 不使用缓存（use_cache=False）
+            # 不需要 mask 的场景：
+            # - Decode 阶段（use_cache=True, start_pos=None）：每次只有一个新 token
+            if (use_cache and start_pos == 0) or not use_cache:
+                causal_mask = create_causal_mask(seq_len_q, device=query.device)
+                scores = scores.masked_fill(causal_mask == 0, float('-inf'))
         
         attention_weights = torch.softmax(scores, dim=-1)
         
@@ -227,12 +253,12 @@ class MultiHeadAttentionWithCache(nn.Module):
         
         attn_output = torch.matmul(attention_weights, V)
         
-        # 4. 拼接多个头
+        # 5. 拼接多个头
         attn_output = attn_output.transpose(1, 2).contiguous().view(
             batch_size, seq_len_q, self.d_model
         )
         
-        # 5. 输出投影
+        # 6. 输出投影
         output = self.W_o(attn_output)
         
         return output, attention_weights
