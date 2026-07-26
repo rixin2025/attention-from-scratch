@@ -1,5 +1,5 @@
 """
-CS336 Chapter 2 — Nsight Systems 性能剖析 Demo
+FA2 — Nsight Systems 性能剖析 Demo
 ================================================
 用 NVTX 标记三种 Attention 实现的前向过程，在 nsys timeline 中直观对比。
 
